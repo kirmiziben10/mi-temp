@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="Connect to your Xiaomi Mi Temperature and Humidity Monitor 2 via Bluetooth and view real-time readings in your browser" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <title>Mi Temperature Monitor - Web Bluetooth App</title>
+
+  <!-- Load theme immediately to prevent flash -->
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem('miTempTheme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
+
+  <script>
+    // Enable transitions after page is loaded
+    window.addEventListener('load', function () {
+      document.documentElement.classList.add('loaded');
+    });
+  </script>
+
+</head>
+
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
+</html>

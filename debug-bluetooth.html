@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bluetooth Device Debugger</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            margin: 10px 5px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        #output {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .success {
+            color: #10b981;
+        }
+
+        .error {
+            color: #ef4444;
+        }
+
+        .info {
+            color: #60a5fa;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🔍 Bluetooth Device Debugger</h1>
+    <p>This tool will help diagnose connection issues with your Mi Temperature Monitor</p>
+
+    <button onclick="scanDevice()">Scan and Connect</button>
+    <button onclick="clearOutput()">Clear Output</button>
+
+    <div id="output">Click "Scan and Connect" to start...</div>
+
+    <script>
+        const output = document.getElementById('output');
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'info';
+            output.innerHTML += `<span class="${className}">[${timestamp}] ${message}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function clearOutput() {
+            output.innerHTML = '';
+        }
+
+        async function scanDevice() {
+            clearOutput();
+            log('🔍 Starting Bluetooth scan...', 'info');
+
+            try {
+                // Request any device to see what's available
+                log('Requesting device...', 'info');
+                const device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { namePrefix: 'LYWSD03' },
+                        { namePrefix: 'ATC' },
+                        { namePrefix: 'Mi' }
+                    ],
+                    optionalServices: ['ebe0ccb0-7a0a-4b0c-8a1a-6ff2997da3a6', 0xfe95, '00010203-0405-0607-0809-0a0b0c0d1912']
+                });
+
+                log(`✅ Device selected: ${device.name}`, 'success');
+                log(`   Device ID: ${device.id}`, 'info');
+
+                // Connect to GATT
+                log('Connecting to GATT server...', 'info');
+                const server = await device.gatt.connect();
+                log('✅ GATT connected!', 'success');
+
+                // Get all services
+                log('Discovering all services...', 'info');
+                const services = await server.getPrimaryServices();
+                log(`✅ Found ${services.length} service(s):`, 'success');
+
+                for (const service of services) {
+                    log(`\n📋 Service: ${service.uuid}`, 'info');
+
+                    try {
+                        const characteristics = await service.getCharacteristics();
+                        log(`   Has ${characteristics.length} characteristic(s):`, 'info');
+
+                        for (const char of characteristics) {
+                            log(`   - ${char.uuid}`, 'info');
+                            log(`     Properties: ${char.properties.read ? 'READ ' : ''}${char.properties.write ? 'WRITE ' : ''}${char.properties.notify ? 'NOTIFY' : ''}`, 'info');
+
+                            // Try to read if it has the temp/humidity characteristic
+                            if (char.uuid === 'ebe0ccc1-7a0a-4b0c-8a1a-6ff2997da3a6') {
+                                log('   📡 This is the temperature/humidity characteristic!', 'success');
+                                try {
+                                    const value = await char.readValue();
+                                    log(`   Raw data (${value.byteLength} bytes): ${Array.from(new Uint8Array(value.buffer)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`, 'info');
+
+                                    // Parse temperature and humidity
+                                    const sign = value.getUint8(1) & (1 << 7);
+                                    let temp = ((value.getUint8(1) & 0x7F) << 8) | value.getUint8(0);
+                                    if (sign) temp = temp - 32767;
+                                    temp = temp / 100;
+                                    const hum = value.getUint8(2);
+
+                                    log(`   🌡️  Temperature: ${temp}°C`, 'success');
+                                    log(`   💧 Humidity: ${hum}%`, 'success');
+                                } catch (err) {
+                                    log(`   ⚠️  Could not read value: ${err.message}`, 'error');
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        log(`   ⚠️  Could not get characteristics: ${err.message}`, 'error');
+                    }
+                }
+
+                log('\n✅ Scan complete!', 'success');
+
+                // Disconnect
+                device.gatt.disconnect();
+                log('Disconnected', 'info');
+
+            } catch (err) {
+                log(`❌ Error: ${err.name} - ${err.message}`, 'error');
+                console.error('Full error:', err);
+            }
+        }
+    </script>
+</body>
+
+</html>
