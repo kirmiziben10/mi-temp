@@ -7,14 +7,13 @@ import {
     Tooltip,
     ResponsiveContainer
 } from 'recharts';
-import './HistoryChart.css';
 
 export const HistoryChart = ({ data, theme = 'light' }) => {
     if (!data || data.length === 0) {
         return (
-            <div className="chart-empty">
-                <p>No history data available.</p>
-                <small>Connect to device to start logging.</small>
+            <div className="flex flex-col items-center justify-center py-10 px-5 text-center text-text-secondary">
+                <p className="m-0 mb-2 text-base">No history data available.</p>
+                <small className="opacity-70 text-[0.85rem]">Connect to device to start logging.</small>
             </div>
         );
     }
@@ -32,10 +31,10 @@ export const HistoryChart = ({ data, theme = 'light' }) => {
     };
 
     return (
-        <div className="history-charts">
-            <div className="chart-container">
-                <h4 className="chart-title">Temperature History</h4>
-                <div className="chart-wrapper">
+        <div className="w-full flex flex-col gap-6">
+            <div className="w-full">
+                <h4 className="m-0 mb-3 text-[0.9rem] font-semibold text-text-secondary">Temperature History</h4>
+                <div className="w-full h-[200px]">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={data}>
                             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
@@ -72,9 +71,9 @@ export const HistoryChart = ({ data, theme = 'light' }) => {
                 </div>
             </div>
 
-            <div className="chart-container">
-                <h4 className="chart-title">Humidity History</h4>
-                <div className="chart-wrapper">
+            <div className="w-full">
+                <h4 className="m-0 mb-3 text-[0.9rem] font-semibold text-text-secondary">Humidity History</h4>
+                <div className="w-full h-[200px]">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={data}>
                             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
