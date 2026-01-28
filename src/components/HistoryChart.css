@@ -1,0 +1,52 @@
+/* History Chart Styles */
+.history-charts {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.chart-container {
+    width: 100%;
+}
+
+.chart-title {
+    margin: 0 0 12px 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.chart-wrapper {
+    width: 100%;
+    height: 200px;
+}
+
+.chart-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.chart-empty p {
+    margin: 0 0 8px 0;
+    font-size: 1rem;
+}
+
+.chart-empty small {
+    opacity: 0.7;
+    font-size: 0.85rem;
+}
+
+/* Recharts overrides for theme compatibility */
+.recharts-cartesian-axis-tick-value {
+    fill: var(--text-secondary);
+}
+
+.recharts-tooltip-wrapper {
+    outline: none;
+}

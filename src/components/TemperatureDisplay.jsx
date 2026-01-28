@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useBluetoothDevice } from '../hooks/useBluetoothDevice';
+import { HistoryChart } from './HistoryChart';
 import './TemperatureDisplay.css';
 
 export const TemperatureDisplay = () => {
@@ -16,7 +17,14 @@ export const TemperatureDisplay = () => {
         isBluetoothAvailable,
         deviceName,
         rawData,
-        debugLog
+        debugLog,
+        history,
+        deviceHistory,
+        bindKey,
+        saveBindKey,
+        activate,
+        fetchDeviceHistory,
+        isFetchingHistory
     } = useBluetoothDevice();
 
     // Load theme from localStorage or default to 'light'
@@ -24,8 +32,12 @@ export const TemperatureDisplay = () => {
         const savedTheme = localStorage.getItem('miTempTheme');
         return savedTheme || 'light';
     });
+
     const [showConsole, setShowConsole] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [historySource, setHistorySource] = useState('local'); // 'local' or 'device'
     const [isClosing, setIsClosing] = useState(false);
+    const [isActivating, setIsActivating] = useState(false);
 
     // Apply theme to document
     useEffect(() => {
@@ -56,6 +68,12 @@ export const TemperatureDisplay = () => {
     const formatTime = (date) => {
         if (!date) return 'Never';
         return date.toLocaleTimeString();
+    };
+
+    const handleActivate = async () => {
+        setIsActivating(true);
+        await activate();
+        setIsActivating(false);
     };
 
     if (!isBluetoothAvailable) {
@@ -95,9 +113,30 @@ export const TemperatureDisplay = () => {
                 </div>
             </div>
 
-            <div className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
-                <span className="status-dot"></span>
-                {connected ? 'Connected' : 'Disconnected'}
+            <div className={`status-row ${showHistory ? 'compact' : ''}`}>
+                <div className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
+                    <span className="status-dot"></span>
+                    {connected ? 'Connected' : 'Disconnected'}
+                </div>
+
+                {showHistory && (
+                    <div className="comfort-inline">
+                        <span className="comfort-symbol-inline">
+                            {temperature !== null && humidity !== null ? (
+                                ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
+                                    ? '(^_^)'
+                                    : <span>(-<span className="lowered-caret">^</span>-)</span>
+                            ) : '--'}
+                        </span>
+                        <span className="comfort-label-inline">
+                            {temperature !== null && humidity !== null ? (
+                                ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
+                                    ? 'Comfortable'
+                                    : 'Uncomfortable'
+                            ) : 'Unknown'}
+                        </span>
+                    </div>
+                )}
             </div>
 
             {deviceName && (
@@ -107,55 +146,93 @@ export const TemperatureDisplay = () => {
             )}
 
             <div className="readings-container">
-                <div className="reading">
-                    <div className="reading-content">
-                        <div className="reading-label">Temperature</div>
-                        <div className="reading-value">
-                            {temperature !== null ? (
-                                <>
-                                    <span className="value-number">{temperature.toFixed(1)}</span>
-                                    <span className="value-unit">°C</span>
-                                </>
-                            ) : (
-                                <span className="value-placeholder">--</span>
+                {showHistory ? (
+                    <>
+                        <div className="history-controls">
+                            <div className="history-source-toggle">
+                                <button
+                                    className={`toggle-btn ${historySource === 'local' ? 'active' : ''}`}
+                                    onClick={() => setHistorySource('local')}
+                                >
+                                    Local ({history.length})
+                                </button>
+                                <button
+                                    className={`toggle-btn ${historySource === 'device' ? 'active' : ''}`}
+                                    onClick={() => setHistorySource('device')}
+                                >
+                                    Device ({deviceHistory.length})
+                                </button>
+                            </div>
+                            {historySource === 'device' && (
+                                <button
+                                    className="btn btn-sm btn-fetch"
+                                    onClick={fetchDeviceHistory}
+                                    disabled={!connected || isFetchingHistory}
+                                >
+                                    {isFetchingHistory ? 'Fetching...' : 'Fetch from Device'}
+                                </button>
                             )}
                         </div>
-                    </div>
-                </div>
-
-                <div className="reading">
-                    <div className="reading-content">
-                        <div className="reading-label">Humidity</div>
-                        <div className="reading-value">
-                            {humidity !== null ? (
-                                <>
-                                    <span className="value-number">{humidity}</span>
-                                    <span className="value-unit">%</span>
-                                </>
-                            ) : (
-                                <span className="value-placeholder">--</span>
-                            )}
+                        <HistoryChart
+                            data={historySource === 'device' ? deviceHistory : history}
+                            theme={theme}
+                        />
+                    </>
+                ) : (
+                    <>
+                        <div className="reading">
+                            <div className="reading-content">
+                                <div className="reading-label">Temperature</div>
+                                <div className="reading-value">
+                                    {temperature !== null ? (
+                                        <>
+                                            <span className="value-number">{temperature.toFixed(1)}</span>
+                                            <span className="value-unit">°C</span>
+                                        </>
+                                    ) : (
+                                        <span className="value-placeholder">--</span>
+                                    )}
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
+
+                        <div className="reading">
+                            <div className="reading-content">
+                                <div className="reading-label">Humidity</div>
+                                <div className="reading-value">
+                                    {humidity !== null ? (
+                                        <>
+                                            <span className="value-number">{humidity}</span>
+                                            <span className="value-unit">%</span>
+                                        </>
+                                    ) : (
+                                        <span className="value-placeholder">--</span>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
 
-            <div className="comfort-section">
-                <div className="comfort-symbol">
-                    {temperature !== null && humidity !== null ? (
-                        ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
-                            ? '(^_^)'
-                            : <span>(-<span className="lowered-caret">^</span>-)</span>
-                    ) : '--'}
+            {!showHistory && (
+                <div className="comfort-section">
+                    <div className="comfort-symbol">
+                        {temperature !== null && humidity !== null ? (
+                            ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
+                                ? '(^_^)'
+                                : <span>(-<span className="lowered-caret">^</span>-)</span>
+                        ) : '--'}
+                    </div>
+                    <div className="comfort-label">
+                        {temperature !== null && humidity !== null ? (
+                            ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
+                                ? 'Comfortable'
+                                : 'Uncomfortable'
+                        ) : 'Status Unknown'}
+                    </div>
                 </div>
-                <div className="comfort-label">
-                    {temperature !== null && humidity !== null ? (
-                        ((temperature >= 19 && temperature <= 27) && (humidity >= 20 && humidity <= 85))
-                            ? 'Comfortable'
-                            : 'Uncomfortable'
-                    ) : 'Status Unknown'}
-                </div>
-            </div>
+            )}
 
             {battery !== null && (
                 <div className="battery-indicator">
@@ -179,6 +256,12 @@ export const TemperatureDisplay = () => {
                     ) : (
                         'Connect to Device'
                     )}
+                </button>
+                <button
+                    className={`btn btn-history ${showHistory ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setShowHistory(!showHistory)}
+                >
+                    {showHistory ? 'Show Current' : 'Show History'}
                 </button>
             </div>
 
@@ -210,6 +293,28 @@ export const TemperatureDisplay = () => {
             </div>
 
             <div className="console-header">Developer Console</div>
+
+            <div className="console-section">
+                <div className="console-title">Tools & Settings</div>
+                <div className="console-item console-item-column">
+                    <span className="console-label">Bind Key (for stock firmware)</span>
+                    <input
+                        type="text"
+                        value={bindKey || ''}
+                        onChange={(e) => saveBindKey(e.target.value)}
+                        placeholder="Enter 32-char hex key"
+                        className="console-input"
+                    />
+                    <button
+                        className="btn btn-sm btn-full-width"
+                        onClick={handleActivate}
+                        disabled={!connected || isActivating}
+                    >
+                        {isActivating ? 'Getting Key...' : 'Get Key from Device'}
+                    </button>
+                    {!connected && <small className="console-hint">Connect device to get key</small>}
+                </div>
+            </div>
 
             {rawData && (
                 <div className="console-section">
