@@ -464,9 +464,9 @@ export const useBluetoothDevice = () => {
           if (value.byteLength >= 14) {
             // idx is available at 0, but unused
             const tsRaw = value.getUint32(4, true);
-            const maxTemp = value.getInt16(8, true) / 100;
+            const maxTemp = value.getInt16(8, true) / 10;
             const maxHum = value.getUint8(10);
-            const minTemp = value.getInt16(11, true) / 100;
+            const minTemp = value.getInt16(11, true) / 10;
             const minHum = value.getUint8(13);
 
             // Calculate timestamp: Device Time + Offset we calculated earlier

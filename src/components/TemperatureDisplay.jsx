@@ -193,7 +193,7 @@ export const TemperatureDisplay = () => {
                                 <div id="temperature-value" className="text-[2.5rem] sm:text-[2rem] font-semibold leading-none text-text-primary">
                                     {temperature !== null ? (
                                         <>
-                                            <span className="text-text-primary">{temperature.toFixed(1)}</span>
+                                            <span className="text-text-primary">{temperature.toFixed(2)}</span>
                                             <span className="text-xl ml-1 text-text-secondary font-normal">°C</span>
                                         </>
                                     ) : (
@@ -331,7 +331,7 @@ export const TemperatureDisplay = () => {
                         <span className="text-text-secondary font-medium shrink-0">Interpreted:</span>
                         <span id="interpreted-value" className="text-text-primary font-mono text-xs break-all text-right">
                             {temperature !== null && humidity !== null
-                                ? `${temperature.toFixed(1)}°C, ${humidity}%`
+                                ? `${temperature.toFixed(2)}°C, ${humidity}%`
                                 : 'No data'}
                         </span>
                     </div>
