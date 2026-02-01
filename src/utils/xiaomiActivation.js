@@ -5,29 +5,12 @@
  * Based on the Mi Home app's activation protocol for LYWSD03MMC devices.
  */
 
-// Activation service and characteristic UUIDs
-const MI_SERVICE_UUID = '00010203-0405-0607-0809-0a0b0c0d1912';
-const AUTH_INIT_CHAR_UUID = '00000010-0000-1000-8000-00805f9b34fb';
-const AUTH_CHAR_UUID = '00000001-0000-1000-8000-00805f9b34fb';
-const FIRMWARE_VER_CHAR_UUID = '00000004-0000-1000-8000-00805f9b34fb';
-const BEACON_KEY_CHAR_UUID = '00000014-0000-1000-8000-00805f9b34fb';
-
-// Activation constants
-const MI_KEY1 = new Uint8Array([
-    0x90, 0xCA, 0x85, 0xDE, 0x70, 0x70, 0x88, 0xA7,
-    0x55, 0x32, 0xAB, 0xFC, 0x83, 0x8C, 0xE8, 0x29
-]);
-
-const MI_KEY2 = new Uint8Array([
-    0x92, 0xAB, 0x54, 0xFA, 0xD3, 0x68, 0xB1, 0x2F,
-    0x5E, 0x31, 0x04, 0x94, 0x1D, 0x8B, 0x76, 0xEF
-]);
-
-const MIX_A = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8d, 0x3d, 0x3c, 0x97]);
-const MIX_B = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x69, 0x12, 0x06, 0xd0]);
+import { UUIDS, CONSTANTS } from './constants';
 
 /**
  * Generate random bytes
+ * @param {number} length - Number of bytes to generate
+ * @returns {Uint8Array} Random bytes
  */
 function generateRandomBytes(length) {
     const bytes = new Uint8Array(length);
@@ -36,104 +19,14 @@ function generateRandomBytes(length) {
 }
 
 /**
- * Mix two byte arrays using XOR
- */
-function mixBytes(a, b) {
-    const result = new Uint8Array(Math.max(a.length, b.length));
-    for (let i = 0; i < result.length; i++) {
-        result[i] = (a[i] || 0) ^ (b[i] || 0);
-    }
-    return result;
-}
-
-/**
- * Cipher function using AES-ECB (simulated with SubtleCrypto)
- */
-async function cipher(key, data) {
-    try {
-        // Import key for AES
-        const cryptoKey = await crypto.subtle.importKey(
-            'raw',
-            key,
-            { name: 'AES-CBC' },
-            false,
-            ['encrypt']
-        );
-
-        // Use zero IV for ECB-like behavior (single block)
-        const iv = new Uint8Array(16);
-
-        const encrypted = await crypto.subtle.encrypt(
-            { name: 'AES-CBC', iv },
-            cryptoKey,
-            data
-        );
-
-        // Return only first 16 bytes (one block)
-        return new Uint8Array(encrypted).slice(0, 16);
-    } catch (err) {
-        console.error('Cipher error:', err);
-        throw err;
-    }
-}
-
-/**
- * Perform the activation handshake
- */
-async function mixA(mac, productId) {
-    const data = new Uint8Array(16);
-    data.set(MIX_A.slice(0, 12), 0);
-
-    // Reverse MAC for mixing
-    const reversedMac = new Uint8Array(mac).reverse();
-    for (let i = 0; i < 6; i++) {
-        data[i] = MIX_A[i] ^ reversedMac[i];
-    }
-
-    // Add product ID
-    data[6] = MIX_A[6] ^ (productId & 0xFF);
-    data[7] = MIX_A[7] ^ ((productId >> 8) & 0xFF);
-    data[8] = MIX_A[8] ^ (productId & 0xFF);
-    data[9] = MIX_A[9] ^ ((productId >> 8) & 0xFF);
-
-    return data;
-}
-
-async function mixB(mac, productId) {
-    const data = new Uint8Array(16);
-    data.set(MIX_B.slice(0, 12), 0);
-
-    // Reverse MAC for mixing
-    const reversedMac = new Uint8Array(mac).reverse();
-    for (let i = 0; i < 6; i++) {
-        data[i] = MIX_B[i] ^ reversedMac[i];
-    }
-
-    // Add product ID
-    data[6] = MIX_B[6] ^ (productId & 0xFF);
-    data[7] = MIX_B[7] ^ ((productId >> 8) & 0xFF);
-    data[8] = MIX_B[8] ^ (productId & 0xFF);
-    data[9] = MIX_B[9] ^ ((productId >> 8) & 0xFF);
-
-    return data;
-}
-
-/**
  * Convert bytes to hex string
+ * @param {Uint8Array} bytes - Bytes to convert
+ * @returns {string} Hex string
  */
 function bytesToHex(bytes) {
     return Array.from(bytes)
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
-}
-
-/**
- * Parse MAC address from device name or ID
- */
-function parseMAC(device) {
-    // Try to extract MAC from device ID (format varies by browser)
-    // For now, return a placeholder - the actual MAC comes from the device
-    return new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
 }
 
 /**
@@ -154,21 +47,21 @@ export async function doActivation(device) {
         // Get the MI service
         let service;
         try {
-            service = await server.getPrimaryService(MI_SERVICE_UUID);
-        } catch (err) {
+            service = await server.getPrimaryService(UUIDS.SERVICE_MI_AUTH);
+        } catch (_err) {
             throw new Error('MI service not found. Device may already be activated or using custom firmware.');
         }
 
         // Get characteristics
-        const authInitChar = await service.getCharacteristic(AUTH_INIT_CHAR_UUID);
-        const authChar = await service.getCharacteristic(AUTH_CHAR_UUID);
+        const authInitChar = await service.getCharacteristic(UUIDS.CHAR_AUTH_INIT);
+        const authChar = await service.getCharacteristic(UUIDS.CHAR_AUTH);
 
         // Try to get beacon key characteristic
         let beaconKeyChar;
         try {
-            beaconKeyChar = await service.getCharacteristic(BEACON_KEY_CHAR_UUID);
-        } catch (err) {
-            console.warn('Beacon key characteristic not available');
+            beaconKeyChar = await service.getCharacteristic(UUIDS.CHAR_BEACON_KEY);
+        } catch (_err) {
+            console.warn('Beacon key characteristic not available', _err);
         }
 
         // Step 1: Send auth init command
@@ -190,19 +83,37 @@ export async function doActivation(device) {
 
         // Wait for response
         const response = await new Promise((resolve, reject) => {
+            let hasResolved = false;
+            
             const timeout = setTimeout(() => {
-                authChar.removeEventListener('characteristicvaluechanged', handler);
-                reject(new Error('Auth response timeout'));
-            }, 10000);
+                if (!hasResolved) {
+                    hasResolved = true;
+                    authChar.removeEventListener('characteristicvaluechanged', handler);
+                    reject(new Error('Auth response timeout'));
+                }
+            }, CONSTANTS.TIMEOUT_AUTH_RESPONSE);
 
             const handler = (event) => {
-                clearTimeout(timeout);
-                authChar.removeEventListener('characteristicvaluechanged', handler);
-                resolve(new Uint8Array(event.target.value.buffer));
+                if (!hasResolved) {
+                    hasResolved = true;
+                    clearTimeout(timeout);
+                    authChar.removeEventListener('characteristicvaluechanged', handler);
+                    resolve(new Uint8Array(event.target.value.buffer));
+                }
             };
 
+            // Fix: Add listener BEFORE writing
             authChar.addEventListener('characteristicvaluechanged', handler);
-            authChar.writeValue(authCmd);
+            
+            // Execute write operation
+            authChar.writeValue(authCmd).catch(writeErr => {
+                if (!hasResolved) {
+                    hasResolved = true;
+                    clearTimeout(timeout);
+                    authChar.removeEventListener('characteristicvaluechanged', handler);
+                    reject(writeErr);
+                }
+            });
         });
 
         console.log('Received auth response:', bytesToHex(response));
@@ -253,10 +164,10 @@ export async function supportsActivation(device) {
     }
 
     try {
-        const service = await device.gatt.getPrimaryService(MI_SERVICE_UUID);
-        await service.getCharacteristic(AUTH_CHAR_UUID);
+        const service = await device.gatt.getPrimaryService(UUIDS.SERVICE_MI_AUTH);
+        await service.getCharacteristic(UUIDS.CHAR_AUTH);
         return true;
-    } catch (err) {
+    } catch (_err) {
         return false;
     }
 }

@@ -1,8 +1,6 @@
 # Mi Temperature Monitor - Web Bluetooth App
 
-A modern, responsive React application to connect to **Xiaomi Mi Temperature and Humidity Monitor 2** devices directly from your browser using the Web Bluetooth API.
-
-![App Preview](PLACEHOLDER_FOR_MAIN_SCREENSHOT_HERE)
+A modern, responsive React application to connect to **Xiaomi Mi Temperature and Humidity Monitor 2** (LYWSD03MMC) devices directly from your browser using the Web Bluetooth API.
 
 ## 🌟 Features
 
@@ -23,16 +21,6 @@ A modern, responsive React application to connect to **Xiaomi Mi Temperature and
     *   Inspect raw hexadecimal data from the device.
     *   View interpreted values and connection logs.
     *   Smooth reveal animations with overlay-free layout.
-
-## 📸 Screenshots
-
-| Desktop Light Mode | Desktop Dark Mode |
-|:---:|:---:|
-| ![Desktop Light](PLACEHOLDER_LINK_HERE) | ![Desktop Dark](PLACEHOLDER_LINK_HERE) |
-
-| Mobile View | Developer Console |
-|:---:|:---:|
-| ![Mobile View](PLACEHOLDER_LINK_HERE) | ![Console View](PLACEHOLDER_LINK_HERE) |
 
 ## 🚀 Getting Started
 
@@ -62,18 +50,17 @@ A modern, responsive React application to connect to **Xiaomi Mi Temperature and
 
 ## 🛠️ Tech Stack
 
-*   [React](https://reactjs.org/)
+*   [React](https://reactjs.org/) 19
 *   [Vite](https://vitejs.dev/)
+*   [Tailwind CSS](https://tailwindcss.com/) v4
+*   [Recharts](https://recharts.org/)
 *   [Web Bluetooth API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API)
-*   CSS3 (Custom Properties & Animations)
 
 ## 👏 Credits & Acknowledgements
 
 **Special thanks to [atc1441/ATC_MiThermometer](https://github.com/atc1441/ATC_MiThermometer)**.
 
 This project relies on the Bluetooth protocol documentation and logic provided by the ATC_MiThermometer repo. The understanding of the service UUIDs (`ebe0ccb0...`) and data parsing logic (decrypting the chaotic byte order of the stock firmware) is credited to their excellent work.
-
-**Development:** Built using **Antigravity IDE** and manual CSS debugging.
 
 ---
 *Note: This app works with the stock firmware. Flashing custom firmware is supported but not required.*

@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useBluetoothDevice } from '../hooks/useBluetoothDevice';
+import { useTheme } from '../hooks/useTheme';
 import { HistoryChart } from './HistoryChart';
 
 export const TemperatureDisplay = () => {
@@ -26,30 +27,13 @@ export const TemperatureDisplay = () => {
         isFetchingHistory
     } = useBluetoothDevice();
 
-    // Load theme from localStorage or default to 'light'
-    const [theme, setTheme] = useState(() => {
-        const savedTheme = localStorage.getItem('miTempTheme');
-        return savedTheme || 'light';
-    });
+    const { theme, toggleTheme } = useTheme();
 
     const [showConsole, setShowConsole] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [historySource, setHistorySource] = useState('local'); // 'local' or 'device'
     const [isClosing, setIsClosing] = useState(false);
     const [isActivating, setIsActivating] = useState(false);
-
-    // Apply theme to document
-    useEffect(() => {
-        document.documentElement.setAttribute('data-theme', theme);
-    }, [theme]);
-
-    const toggleTheme = () => {
-        setTheme(prev => {
-            const newTheme = prev === 'light' ? 'dark' : 'light';
-            localStorage.setItem('miTempTheme', newTheme);
-            return newTheme;
-        });
-    };
 
     const handleToggleConsole = () => {
         if (showConsole) {
@@ -103,6 +87,7 @@ export const TemperatureDisplay = () => {
                         className="w-9 h-9 rounded-md border border-border-primary bg-bg-tertiary text-text-primary cursor-pointer flex items-center justify-center text-lg transition-all duration-300 hover:bg-border-primary"
                         onClick={toggleTheme}
                         title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                        aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
                     >
                         {theme === 'light' ? '🌙' : '☀️'}
                     </button>
@@ -111,6 +96,7 @@ export const TemperatureDisplay = () => {
                         className="w-9 h-9 rounded-md border border-border-primary bg-bg-tertiary text-text-primary cursor-pointer flex items-center justify-center text-lg transition-all duration-300 hover:bg-border-primary"
                         onClick={handleToggleConsole}
                         title="Toggle developer console"
+                        aria-label="Toggle developer console"
                     >
                         {showConsole ? '✕' : '⚙'}
                     </button>
@@ -167,6 +153,7 @@ export const TemperatureDisplay = () => {
                                         : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
                                         }`}
                                     onClick={() => setHistorySource('local')}
+                                    aria-pressed={historySource === 'local'}
                                 >
                                     Local ({history.length})
                                 </button>
@@ -177,6 +164,7 @@ export const TemperatureDisplay = () => {
                                         : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
                                         }`}
                                     onClick={() => setHistorySource('device')}
+                                    aria-pressed={historySource === 'device'}
                                 >
                                     Device ({deviceHistory.length})
                                 </button>
@@ -295,6 +283,7 @@ export const TemperatureDisplay = () => {
                     id="console-back-btn"
                     className="px-4 py-2 rounded-md border border-border-primary bg-bg-tertiary text-text-primary cursor-pointer text-sm font-medium transition-all duration-300 hover:bg-border-primary"
                     onClick={handleToggleConsole}
+                    aria-label="Close developer console"
                 >
                     Close ✕
                 </button>
@@ -313,6 +302,7 @@ export const TemperatureDisplay = () => {
                         onChange={(e) => saveBindKey(e.target.value)}
                         placeholder="Enter 32-char hex key"
                         className="w-full p-2 rounded border border-border-primary bg-bg-tertiary text-text-primary text-[0.8125rem] font-mono placeholder:text-text-tertiary"
+                        aria-label="Bind Key"
                     />
                     <button
                         id="get-key-btn"
@@ -350,7 +340,7 @@ export const TemperatureDisplay = () => {
 
             <div id="debug-log-section" className="flex-1 flex flex-col min-h-0 overflow-hidden">
                 <div className="font-medium mb-3 text-text-secondary text-xs uppercase tracking-wider shrink-0">Debug Log</div>
-                <div id="debug-log" className="flex-1 overflow-y-auto bg-bg-tertiary rounded-md p-3 min-h-[100px]">
+                <div id="debug-log" className="flex-1 overflow-y-auto bg-bg-tertiary rounded-md p-3 min-h-[100px]" role="log" aria-live="polite">
                     {debugLog.length === 0 ? (
                         <div className="text-text-tertiary italic text-center py-8">No log entries yet</div>
                     ) : (
