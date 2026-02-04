@@ -1,28 +1,18 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { doActivation } from '../utils/xiaomiActivation';
+import { UUIDS, CONSTANTS } from '../utils/constants';
 
-const SERVICE_UUID = 'ebe0ccb0-7a0a-4b0c-8a1a-6ff2997da3a6';
-const TEMP_HUMIDITY_CHAR_UUID = 'ebe0ccc1-7a0a-4b0c-8a1a-6ff2997da3a6';
-const BATTERY_SERVICE_UUID = 0x180F;
-const BATTERY_LEVEL_CHAR_UUID = 0x2A19;
-
-// ATC custom firmware history characteristics
-const ATC_SERVICE_UUID = 0x1F10;
-const ATC_CMD_CHAR_UUID = 0x1F1F;  // Command characteristic
-
-// History command IDs for ATC firmware
-const CMD_ID_MEMO_START = 0x35;  // Start reading memory
-const CMD_ID_MEMO_DATA = 0x36;   // Memory data response
-
-// Stock firmware history characteristics
-const UUID_HISTORY = 'ebe0ccbc-7a0a-4b0c-8a1a-6ff2997da3a6';      // History data notifications
-const UUID_NUM_RECORDS = 'ebe0ccb9-7a0a-4b0c-8a1a-6ff2997da3a6';  // Total/current record count
-const UUID_RECORD_IDX = 'ebe0ccba-7a0a-4b0c-8a1a-6ff2997da3a6';   // Set starting record index
-const UUID_TIME = 'ebe0ccb7-7a0a-4b0c-8a1a-6ff2997da3a6';         // Device timestamp
-
+/**
+ * Custom hook for managing Bluetooth connection to Xiaomi Temperature Monitor
+ * Handles connection, data parsing, history fetching, and activation.
+ * 
+ * @returns {Object} Bluetooth device state and methods
+ */
 export const useBluetoothDevice = () => {
   const [device, setDevice] = useState(null);
   const deviceRef = useRef(null);
+  const listenersRef = useRef([]); // Store active listeners for cleanup
+  
   const [connected, setConnected] = useState(false);
   const [temperature, setTemperature] = useState(null);
   const [humidity, setHumidity] = useState(null);
@@ -37,10 +27,36 @@ export const useBluetoothDevice = () => {
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
   const [bindKey, setBindKey] = useState(null);
 
-  // Add debug log entry
+  /**
+   * Add a cleanup function to the list
+   * @param {Function} cleanupFn - Function to run on cleanup
+   */
+  const addCleanupListener = useCallback((cleanupFn) => {
+    listenersRef.current.push(cleanupFn);
+  }, []);
+
+  /**
+   * Run all cleanup listeners and clear the list
+   */
+  const cleanupListeners = useCallback(() => {
+    listenersRef.current.forEach(fn => {
+      try {
+        fn();
+      } catch (e) {
+        console.warn('Error during cleanup:', e);
+      }
+    });
+    listenersRef.current = [];
+  }, []);
+
+  /**
+   * Add a debug log entry
+   * @param {string} message - Log message
+   * @param {any} data - Optional data to log
+   */
   const addDebugLog = useCallback((message, data = null) => {
     const timestamp = new Date().toLocaleTimeString();
-    setDebugLog(prev => [...prev, { timestamp, message, data }].slice(-50)); // Keep last 50 entries
+    setDebugLog(prev => [...prev, { timestamp, message, data }].slice(-CONSTANTS.MAX_DEBUG_LOGS));
   }, []);
 
   // Load history from localStorage on mount
@@ -67,7 +83,7 @@ export const useBluetoothDevice = () => {
         temperature: temp,
         humidity: hum
       };
-      const updated = [...prev, newEntry].slice(-1000); // Keep last 1000 entries
+      const updated = [...prev, newEntry].slice(-CONSTANTS.MAX_HISTORY_ENTRIES);
       try {
         localStorage.setItem('mi_temp_history', JSON.stringify(updated));
       } catch (err) {
@@ -88,7 +104,10 @@ export const useBluetoothDevice = () => {
     }
   }, [addDebugLog]);
 
-  // Parse the temperature/humidity characteristic value
+  /**
+   * Parse the temperature/humidity characteristic value
+   * @param {DataView} value - Raw data view
+   */
   const parseData = useCallback((value) => {
     try {
       // Store raw data
@@ -136,14 +155,18 @@ export const useBluetoothDevice = () => {
     parseData(value);
   }, [parseData]);
 
-  // Connect to the device with retry logic
+  /**
+   * Connect to the device with retry logic
+   */
   const connect = useCallback(async () => {
+    if (isConnecting) return;
+    
     setIsConnecting(true);
     setError(null);
     setDebugLog([]);
     addDebugLog('Starting connection...');
 
-    const maxRetries = 3;
+    const maxRetries = CONSTANTS.MAX_CONNECTION_RETRIES;
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -161,10 +184,10 @@ export const useBluetoothDevice = () => {
               { namePrefix: 'Mi' }
             ],
             optionalServices: [
-              SERVICE_UUID,
-              BATTERY_SERVICE_UUID,
-              0xfe95,
-              '00010203-0405-0607-0809-0a0b0c0d1912'
+              UUIDS.SERVICE_MAIN,
+              UUIDS.SERVICE_BATTERY,
+              UUIDS.SERVICE_MI_DATA,
+              UUIDS.SERVICE_MI_AUTH
             ]
           });
 
@@ -172,15 +195,21 @@ export const useBluetoothDevice = () => {
           setDevice(bluetoothDevice);
 
           // Listen for disconnection
-          bluetoothDevice.addEventListener('gattserverdisconnected', () => {
+          const handleDisconnect = () => {
             console.log('Device disconnected');
             addDebugLog('Device disconnected');
             setConnected(false);
             setTemperature(null);
             setHumidity(null);
             setBattery(null);
-          });
+            cleanupListeners(); // Clean up all listeners on disconnect
+          };
 
+          bluetoothDevice.addEventListener('gattserverdisconnected', handleDisconnect);
+          
+          // Add disconnection listener cleanup manually since it's on the device, not a characteristic
+          // We don't add it to listenersRef because we want it to persist until actual disconnect
+        
           // Store device for retries
           deviceRef.current = bluetoothDevice;
         }
@@ -196,19 +225,26 @@ export const useBluetoothDevice = () => {
         addDebugLog('GATT server connected');
 
         // Get the main service
-        addDebugLog('Getting service', SERVICE_UUID);
-        const service = await server.getPrimaryService(SERVICE_UUID);
+        addDebugLog('Getting service', UUIDS.SERVICE_MAIN);
+        const service = await server.getPrimaryService(UUIDS.SERVICE_MAIN);
         addDebugLog('Service found');
 
         // Get the temperature/humidity characteristic
-        addDebugLog('Getting characteristic', TEMP_HUMIDITY_CHAR_UUID);
-        const characteristic = await service.getCharacteristic(TEMP_HUMIDITY_CHAR_UUID);
+        addDebugLog('Getting characteristic', UUIDS.CHAR_TEMP_HUMIDITY);
+        const characteristic = await service.getCharacteristic(UUIDS.CHAR_TEMP_HUMIDITY);
         addDebugLog('Characteristic found');
 
         // Start notifications
         addDebugLog('Starting notifications...');
         await characteristic.startNotifications();
         characteristic.addEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+        
+        // Register cleanup for this listener
+        addCleanupListener(() => {
+            characteristic.removeEventListener('characteristicvaluechanged', handleCharacteristicValueChanged);
+            characteristic.stopNotifications().catch(e => console.warn('Failed to stop notifications', e));
+        });
+        
         addDebugLog('Notifications enabled');
 
         // Read the initial value
@@ -219,14 +255,23 @@ export const useBluetoothDevice = () => {
         // Try to get Battery Service
         try {
           addDebugLog('Getting battery service...');
-          const batteryService = await server.getPrimaryService(BATTERY_SERVICE_UUID);
-          const batteryChar = await batteryService.getCharacteristic(BATTERY_LEVEL_CHAR_UUID);
+          const batteryService = await server.getPrimaryService(UUIDS.SERVICE_BATTERY);
+          const batteryChar = await batteryService.getCharacteristic(UUIDS.CHAR_BATTERY_LEVEL);
 
           await batteryChar.startNotifications();
-          batteryChar.addEventListener('characteristicvaluechanged', (e) => {
+          
+          const handleBatteryChange = (e) => {
             const level = e.target.value.getUint8(0);
             setBattery(level);
             addDebugLog('Battery level updated', `${level}%`);
+          };
+          
+          batteryChar.addEventListener('characteristicvaluechanged', handleBatteryChange);
+          
+          // Register cleanup for battery listener
+          addCleanupListener(() => {
+              batteryChar.removeEventListener('characteristicvaluechanged', handleBatteryChange);
+              batteryChar.stopNotifications().catch(e => console.warn('Failed to stop battery notifications', e));
           });
 
           const batteryValue = await batteryChar.readValue();
@@ -235,7 +280,8 @@ export const useBluetoothDevice = () => {
           addDebugLog('Battery level read', `${level}%`);
         } catch (battErr) {
           console.warn('Battery service not available:', battErr);
-          addDebugLog('Battery service failed', battErr.message);
+          // Don't fail the whole connection, just log it
+          addDebugLog('Battery service failed (non-fatal)', battErr.message);
         }
 
         setConnected(true);
@@ -255,7 +301,7 @@ export const useBluetoothDevice = () => {
 
         // Wait before retrying (exponential backoff)
         if (attempt < maxRetries) {
-          const waitTime = Math.min(1000 * Math.pow(2, attempt - 1), 3000);
+          const waitTime = Math.min(CONSTANTS.TIMEOUT_CONNECTION_RETRY_BASE * Math.pow(2, attempt - 1), CONSTANTS.TIMEOUT_CONNECTION_RETRY_MAX);
           addDebugLog(`Retrying in ${waitTime}ms...`);
           await new Promise(resolve => setTimeout(resolve, waitTime));
         }
@@ -285,11 +331,15 @@ export const useBluetoothDevice = () => {
     setError(errorMessage);
     setIsConnecting(false);
     setConnected(false);
-  }, [handleCharacteristicValueChanged, parseData, addDebugLog]);
+    cleanupListeners(); // Cleanup any partial listeners
+  }, [handleCharacteristicValueChanged, parseData, addDebugLog, addCleanupListener, cleanupListeners, isConnecting]);
 
-  // Disconnect from the device
+  /**
+   * Disconnect from the device
+   */
   const disconnect = useCallback(() => {
     if (deviceRef.current && deviceRef.current.gatt.connected) {
+      cleanupListeners(); // Clean up listeners before disconnecting
       deviceRef.current.gatt.disconnect();
       addDebugLog('Disconnected by user');
       setConnected(false);
@@ -299,9 +349,11 @@ export const useBluetoothDevice = () => {
       setHumidity(null);
       setBattery(null);
     }
-  }, [addDebugLog]);
+  }, [addDebugLog, cleanupListeners]);
 
-  // Perform activation to get bind key
+  /**
+   * Perform activation to get bind key
+   */
   const activate = useCallback(async () => {
     if (!deviceRef.current) {
       setError('No device connected. Please connect first.');
@@ -330,7 +382,9 @@ export const useBluetoothDevice = () => {
     }
   }, [addDebugLog, saveBindKey]);
 
-  // Fetch device history (supports both Stock and ATC firmware)
+  /**
+   * Fetch device history (supports both Stock and ATC firmware)
+   */
   const fetchDeviceHistory = useCallback(async () => {
     if (!deviceRef.current || !deviceRef.current.gatt.connected) {
       setError('No device connected. Please connect first.');
@@ -350,13 +404,13 @@ export const useBluetoothDevice = () => {
       // -------------------------------------------------------------
       try {
         addDebugLog('Checking for stock firmware history service...');
-        const service = await server.getPrimaryService(SERVICE_UUID);
+        const service = await server.getPrimaryService(UUIDS.SERVICE_MAIN);
 
         // Check if history characteristic exists
         let historyChar;
         try {
-          historyChar = await service.getCharacteristic(UUID_HISTORY);
-        } catch (e) {
+          historyChar = await service.getCharacteristic(UUIDS.CHAR_HISTORY_DATA);
+        } catch (_e) {
           // If main service exists but history char doesn't, it might be an older firmware or different mode
           // Fall through to catch block to try ATC
           throw new Error('Stock history characteristic not found');
@@ -366,31 +420,20 @@ export const useBluetoothDevice = () => {
 
         // 1. Get device time to calculate start time
         addDebugLog('Reading device time...');
-        const timeChar = await service.getCharacteristic(UUID_TIME);
+        const timeChar = await service.getCharacteristic(UUIDS.CHAR_DEVICE_TIME);
         const timeValue = await timeChar.readValue();
 
         // Parse time: [timestamp(4), tz_offset(1)?]
         const deviceTimestamp = timeValue.getUint32(0, true); // Little-endian
 
         // Calculate device activation time (approximate)
-        // Current Time = Device Start Time + Device Uptime
-        // We know Device Current Time (deviceTimestamp), so we can map it to our wall clock
-        // Actually, the records store "seconds since boot" or "timestamp".
-        // The Python library calculates start_time = current_wall_time - device_uptime
-        // But here `deviceTimestamp` seems to be a Unix timestamp in recent firmware?
-        // Let's assume it's a standard timestamp for now or offset.
-        // Actually, looking at lywsd02 code: 
-        // start_time_delta = device_time - (1970-01-01) - tz_offset
-        // device_start_time = now - start_time_delta
-        // So effectively, we align device time to our time.
-
         const now = Date.now() / 1000;
         const timeOffset = now - deviceTimestamp;
         addDebugLog(`Time sync: device=${deviceTimestamp}, offset=${timeOffset.toFixed(0)}s`);
 
         // 2. Get number of records
         addDebugLog('Reading record count...');
-        const numRecordsChar = await service.getCharacteristic(UUID_NUM_RECORDS);
+        const numRecordsChar = await service.getCharacteristic(UUIDS.CHAR_NUM_RECORDS);
         const numRecordsValue = await numRecordsChar.readValue();
         const totalRecords = numRecordsValue.getUint32(0, true);
         const currentRecords = numRecordsValue.getUint32(4, true);
@@ -404,14 +447,13 @@ export const useBluetoothDevice = () => {
         }
 
         // 3. Set index to read from (0 = start)
-        const idxChar = await service.getCharacteristic(UUID_RECORD_IDX);
+        const idxChar = await service.getCharacteristic(UUIDS.CHAR_RECORD_IDX);
         const idxBuffer = new ArrayBuffer(4);
         new DataView(idxBuffer).setUint32(0, 0, true);
         await idxChar.writeValue(idxBuffer);
 
         // 4. Subscribe to history notifications
         const historyEntries = [];
-        let receivingData = true;
         let lastUpdate = Date.now();
 
         const handleStockHistory = (event) => {
@@ -420,18 +462,14 @@ export const useBluetoothDevice = () => {
           // [idx(4)] [ts(4)] [max_temp(2)] [max_hum(1)] [min_temp(2)] [min_hum(1)]
 
           if (value.byteLength >= 14) {
-            const idx = value.getUint32(0, true);
+            // idx is available at 0, but unused
             const tsRaw = value.getUint32(4, true);
-            const maxTemp = value.getInt16(8, true) / 100;
+            const maxTemp = value.getInt16(8, true) / 10;
             const maxHum = value.getUint8(10);
-            const minTemp = value.getInt16(11, true) / 100;
+            const minTemp = value.getInt16(11, true) / 10;
             const minHum = value.getUint8(13);
 
             // Calculate timestamp: Device Time + Offset we calculated earlier
-            // If tsRaw is Unix timestamp, use it directly? 
-            // The python library says: ts = self.start_time + timedelta(seconds=ts)
-            // This implies tsRaw is seconds since boot (uptime) or similar relative time.
-            // Let's rely on the offset we calculated: real_ts = tsRaw + timeOffset
             const timestamp = (tsRaw + timeOffset) * 1000;
 
             historyEntries.push({
@@ -460,7 +498,7 @@ export const useBluetoothDevice = () => {
         await new Promise((resolve) => {
           const checkInterval = setInterval(() => {
             // Timeout if no data for 3 seconds OR we have all records
-            if (Date.now() - lastUpdate > 3000 || historyEntries.length >= currentRecords) {
+            if (Date.now() - lastUpdate > CONSTANTS.TIMEOUT_HISTORY_CHUNK || historyEntries.length >= currentRecords) {
               clearInterval(checkInterval);
               resolve();
             }
@@ -490,14 +528,14 @@ export const useBluetoothDevice = () => {
       // Try to get ATC service
       let atcService;
       try {
-        atcService = await server.getPrimaryService(ATC_SERVICE_UUID);
+        atcService = await server.getPrimaryService(UUIDS.SERVICE_ATC);
         addDebugLog('ATC service found');
-      } catch (err) {
+      } catch (_err) {
         throw new Error('Neither Stock nor ATC firmware history available.');
       }
 
       // Get command characteristic
-      const cmdChar = await atcService.getCharacteristic(ATC_CMD_CHAR_UUID);
+      const cmdChar = await atcService.getCharacteristic(UUIDS.CHAR_ATC_CMD);
       addDebugLog('Command characteristic found');
 
       const historyEntries = [];
@@ -509,10 +547,10 @@ export const useBluetoothDevice = () => {
         const value = event.target.value;
         const cmdId = value.getUint8(0);
 
-        if (cmdId === CMD_ID_MEMO_DATA) {
+        if (cmdId === CONSTANTS.CMD_ID_MEMO_DATA) {
           // Parse history data packet
           // Format: [cmd_id(1)] [timestamp(4)] [temp(2)] [hum(1)] [battery(1)] ...
-          const packetSize = 9; // Each entry is 9 bytes
+          const packetSize = CONSTANTS.HISTORY_PACKET_SIZE_ATC;
           const numEntries = Math.floor((value.byteLength - 1) / packetSize);
 
           for (let i = 0; i < numEntries; i++) {
@@ -540,7 +578,7 @@ export const useBluetoothDevice = () => {
           if (timeout) clearTimeout(timeout);
           timeout = setTimeout(() => {
             receivingData = false;
-          }, 2000);
+          }, CONSTANTS.TIMEOUT_ATC_CHUNK);
         }
       };
 
@@ -551,7 +589,7 @@ export const useBluetoothDevice = () => {
       // Command format: [CMD_ID_MEMO_START] [start_offset(4 bytes, little-endian)]
       const cmdBuffer = new ArrayBuffer(5);
       const cmdView = new DataView(cmdBuffer);
-      cmdView.setUint8(0, CMD_ID_MEMO_START);
+      cmdView.setUint8(0, CONSTANTS.CMD_ID_MEMO_START);
       cmdView.setUint32(1, 0, true); // Start from offset 0
 
       addDebugLog('Sending history read command...');
@@ -566,12 +604,12 @@ export const useBluetoothDevice = () => {
           }
         }, 500);
 
-        // Maximum wait time of 30 seconds
+        // Maximum wait time
         setTimeout(() => {
           receivingData = false;
           clearInterval(checkInterval);
           resolve();
-        }, 30000);
+        }, CONSTANTS.TIMEOUT_HISTORY_FETCH);
       });
 
       // Cleanup
@@ -602,11 +640,12 @@ export const useBluetoothDevice = () => {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      cleanupListeners();
       if (deviceRef.current && deviceRef.current.gatt.connected) {
         deviceRef.current.gatt.disconnect();
       }
     };
-  }, []);
+  }, [cleanupListeners]);
 
   return {
     connect,

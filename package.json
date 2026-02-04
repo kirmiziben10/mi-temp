@@ -1,8 +1,26 @@
 {
-  "name": "xiaomi",
+  "name": "mi-temperature-monitor",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "description": "A modern, responsive React application to connect to Xiaomi Mi Temperature and Humidity Monitor 2 devices using Web Bluetooth API.",
+  "author": "kirmiziben10",
+  "license": "MIT",
+  "homepage": "https://github.com/kirmiziben10/mi-temp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirmiziben10/mi-temp.git"
+  },
+  "keywords": [
+    "xiaomi",
+    "mi-temp",
+    "bluetooth",
+    "web-bluetooth",
+    "react",
+    "vite",
+    "lywsd03mmc",
+    "iot"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

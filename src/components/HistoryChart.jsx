@@ -91,6 +91,7 @@ export const HistoryChart = ({ data, theme = 'light' }) => {
                             />
                             <Tooltip
                                 labelFormatter={(label) => new Date(label).toLocaleString()}
+                                formatter={(value, name) => [value.toFixed(2), name]}
                                 contentStyle={{
                                     backgroundColor: isDark ? '#333' : '#fff',
                                     border: `1px solid ${gridColor}`,
@@ -130,6 +131,7 @@ export const HistoryChart = ({ data, theme = 'light' }) => {
                             />
                             <Tooltip
                                 labelFormatter={(label) => new Date(label).toLocaleString()}
+                                formatter={(value, name) => [value.toFixed(2), name]}
                                 contentStyle={{
                                     backgroundColor: isDark ? '#333' : '#fff',
                                     border: `1px solid ${gridColor}`,
