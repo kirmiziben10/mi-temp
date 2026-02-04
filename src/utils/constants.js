@@ -18,12 +18,11 @@ export const UUIDS = {
   SERVICE_ATC: 0x1F10,
   CHAR_ATC_CMD: 0x1F1F,
 
-  // Xiaomi Activation Service
-  SERVICE_MI_AUTH: '00010203-0405-0607-0809-0a0b0c0d1912',
-  CHAR_AUTH_INIT: '00000010-0000-1000-8000-00805f9b34fb',
-  CHAR_AUTH: '00000001-0000-1000-8000-00805f9b34fb',
-  CHAR_FIRMWARE_VER: '00000004-0000-1000-8000-00805f9b34fb',
-  CHAR_BEACON_KEY: '00000014-0000-1000-8000-00805f9b34fb',
+  // Xiaomi Activation Service (Mi Auth)
+  SERVICE_MI_AUTH: 0xfe95,
+  CHAR_MI_ENC_10: 0x0010,   // Main command characteristic
+  CHAR_MI_ENC_19: 0x0019,   // Data exchange characteristic
+  CHAR_MI_FW_VER: 0x0004,   // Firmware version
 
   // Stock Firmware History
   CHAR_HISTORY_DATA: 'ebe0ccbc-7a0a-4b0c-8a1a-6ff2997da3a6',

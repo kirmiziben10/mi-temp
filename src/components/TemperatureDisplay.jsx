@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useBluetoothDevice } from '../hooks/useBluetoothDevice';
 import { useTheme } from '../hooks/useTheme';
-import { HistoryChart } from './HistoryChart';
+import { HistoryChart, TIME_PERIODS, TimePeriodToggle } from './HistoryChart';
 
 export const TemperatureDisplay = () => {
     const {
@@ -32,8 +32,15 @@ export const TemperatureDisplay = () => {
     const [showConsole, setShowConsole] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [historySource, setHistorySource] = useState('local'); // 'local' or 'device'
+    const [selectedTimePeriod, setSelectedTimePeriod] = useState(TIME_PERIODS[2]); // Default to 24h
     const [isClosing, setIsClosing] = useState(false);
     const [isActivating, setIsActivating] = useState(false);
+    const [showDeviceTooltip, setShowDeviceTooltip] = useState(false);
+
+    // For triple-click and long-press detection on Device button
+    const deviceClickCount = useRef(0);
+    const deviceClickTimer = useRef(null);
+    const longPressTimer = useRef(null);
 
     const handleToggleConsole = () => {
         if (showConsole) {
@@ -57,6 +64,51 @@ export const TemperatureDisplay = () => {
         setIsActivating(true);
         await activate();
         setIsActivating(false);
+    };
+
+    // Handle Device button click - triple click triggers fetch
+    const handleDeviceClick = () => {
+        deviceClickCount.current += 1;
+
+        if (deviceClickCount.current === 1) {
+            // First click - switch to device and show tooltip
+            if (historySource !== 'device') {
+                setHistorySource('device');
+                setShowDeviceTooltip(true);
+            }
+            // Start timer to reset click count
+            deviceClickTimer.current = setTimeout(() => {
+                deviceClickCount.current = 0;
+            }, 500);
+        } else if (deviceClickCount.current >= 3) {
+            // Triple click - fetch from device
+            clearTimeout(deviceClickTimer.current);
+            deviceClickCount.current = 0;
+            if (connected && !isFetchingHistory) {
+                fetchDeviceHistory();
+            }
+        }
+    };
+
+    // Handle long press on Device button
+    const handleDeviceMouseDown = () => {
+        longPressTimer.current = setTimeout(() => {
+            if (connected && !isFetchingHistory) {
+                fetchDeviceHistory();
+            }
+        }, 500);
+    };
+
+    const handleDeviceMouseUp = () => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+        }
+    };
+
+    const handleDeviceMouseLeave = () => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+        }
     };
 
     if (!isBluetoothAvailable) {
@@ -144,45 +196,69 @@ export const TemperatureDisplay = () => {
             <div id="readings-container" className={`grid gap-4 mb-8 ${showHistory ? 'block' : 'grid-cols-1 sm:grid-cols-2'}`}>
                 {showHistory ? (
                     <>
-                        <div id="history-controls" className="flex justify-between items-center gap-2 mb-4 flex-wrap">
-                            <div id="history-source-toggle" className="flex gap-0 rounded-md overflow-hidden border border-border-primary">
-                                <button
-                                    id="history-source-local-btn"
-                                    className={`px-3 py-1.5 text-xs font-medium border-0 border-r border-border-primary cursor-pointer transition-all duration-200 ${historySource === 'local'
-                                        ? 'bg-text-primary text-bg-secondary'
-                                        : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
-                                        }`}
-                                    onClick={() => setHistorySource('local')}
-                                    aria-pressed={historySource === 'local'}
-                                >
-                                    Local ({history.length})
-                                </button>
-                                <button
-                                    id="history-source-device-btn"
-                                    className={`px-3 py-1.5 text-xs font-medium border-0 cursor-pointer transition-all duration-200 ${historySource === 'device'
-                                        ? 'bg-text-primary text-bg-secondary'
-                                        : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
-                                        }`}
-                                    onClick={() => setHistorySource('device')}
-                                    aria-pressed={historySource === 'device'}
-                                >
-                                    Device ({deviceHistory.length})
-                                </button>
+                        <div id="history-controls" className="flex flex-col gap-2 mb-4">
+                            <div className="flex justify-between items-center gap-4">
+                                <TimePeriodToggle
+                                    selectedPeriod={selectedTimePeriod}
+                                    onPeriodChange={setSelectedTimePeriod}
+                                />
+                                <div id="history-source-toggle" className="relative flex gap-0 rounded-md overflow-hidden border border-border-primary">
+                                    <button
+                                        id="history-source-local-btn"
+                                        className={`px-3 py-1.5 text-xs font-medium border-0 border-r border-border-primary cursor-pointer transition-all duration-200 whitespace-nowrap ${historySource === 'local'
+                                            ? 'bg-text-primary text-bg-secondary'
+                                            : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
+                                            }`}
+                                        onClick={() => { setHistorySource('local'); setShowDeviceTooltip(false); }}
+                                        aria-pressed={historySource === 'local'}
+                                    >
+                                        Local ({history.length})
+                                    </button>
+                                    <button
+                                        id="history-source-device-btn"
+                                        className={`px-3 py-1.5 text-xs font-medium border-0 cursor-pointer transition-all duration-200 whitespace-nowrap ${historySource === 'device'
+                                            ? 'bg-text-primary text-bg-secondary'
+                                            : 'bg-bg-tertiary text-text-secondary hover:bg-border-primary'
+                                            }`}
+                                        onClick={handleDeviceClick}
+                                        onMouseDown={handleDeviceMouseDown}
+                                        onMouseUp={handleDeviceMouseUp}
+                                        onMouseLeave={handleDeviceMouseLeave}
+                                        onTouchStart={handleDeviceMouseDown}
+                                        onTouchEnd={handleDeviceMouseUp}
+                                        aria-pressed={historySource === 'device'}
+                                    >
+                                        Device ({deviceHistory.length})
+                                    </button>
+                                    {/* Floating tooltip bubble */}
+                                    {historySource === 'device' && showDeviceTooltip && (
+                                        <div className="absolute top-full right-0 mt-2 z-10 w-64">
+                                            {/* Arrow */}
+                                            <div className="absolute -top-1.5 right-4 w-3 h-3 bg-bg-tertiary border-l border-t border-border-secondary rotate-45"></div>
+                                            {/* Bubble content */}
+                                            <div className="relative p-3 bg-bg-tertiary rounded-lg border border-border-secondary text-xs text-text-secondary shadow-lg">
+                                                <button
+                                                    onClick={() => setShowDeviceTooltip(false)}
+                                                    className="absolute top-1.5 right-1.5 w-4 h-4 flex items-center justify-center text-text-tertiary hover:text-text-primary cursor-pointer bg-transparent border-0 text-[10px]"
+                                                    aria-label="Dismiss"
+                                                >
+                                                    ✕
+                                                </button>
+                                                <p className="m-0 mb-1.5 font-medium text-text-primary pr-4">How to fetch device history:</p>
+                                                <ol className="m-0 pl-4 space-y-1">
+                                                    <li>Open <strong>Settings</strong> (⚙) and set your <strong>Bind Key</strong></li>
+                                                    <li><strong>Hold</strong> or <strong>triple-click</strong> the Device button</li>
+                                                </ol>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            {historySource === 'device' && (
-                                <button
-                                    id="fetch-history-btn"
-                                    className="px-4 py-2 text-[0.8125rem] font-medium border border-border-primary rounded-md cursor-pointer transition-all duration-300 flex items-center justify-center gap-2 bg-text-primary text-bg-secondary border-text-primary hover:not-disabled:opacity-80 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    onClick={fetchDeviceHistory}
-                                    disabled={!connected || isFetchingHistory}
-                                >
-                                    {isFetchingHistory ? 'Fetching...' : 'Fetch from Device'}
-                                </button>
-                            )}
                         </div>
                         <HistoryChart
                             data={historySource === 'device' ? deviceHistory : history}
                             theme={theme}
+                            selectedPeriod={selectedTimePeriod}
                         />
                     </>
                 ) : (
