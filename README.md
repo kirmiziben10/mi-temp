@@ -21,7 +21,11 @@ Works with the **stock Xiaomi firmware** and with **[pvvx custom firmware](https
 
 ### In a browser
 
+**Live site: https://kirmiziben10.github.io/mi-temp/** (deployed from `main` by `.github/workflows/pages.yml`).
+
 You need a browser with [Web Bluetooth](https://caniuse.com/web-bluetooth): Chrome, Edge or Opera on desktop or Android. Web Bluetooth only works over **HTTPS or `localhost`**.
+
+To run it locally:
 
 ```bash
 npm install
