@@ -42,7 +42,8 @@ export class DeviceSession {
         ? 'stock'
         : null;
     if (!firmware) throw new Error('This does not look like a supported thermometer (no known services).');
-    const supportsActivation = firmware === 'stock' && (await conn.hasService(MI_AUTH.SERVICE));
+    // Optional feature: a discovery hiccup here only hides the button (activation re-checks itself).
+    const supportsActivation = firmware === 'stock' && (await conn.hasService(MI_AUTH.SERVICE).catch(() => false));
     cb.log('Firmware detected', firmware === 'stock' ? 'Xiaomi stock' : 'pvvx custom');
 
     const session = new DeviceSession(conn, firmware, supportsActivation, cb);
@@ -80,8 +81,8 @@ export class DeviceSession {
   }
 
   private async startBattery() {
-    if (!(await this.conn.hasCharacteristic(BATTERY.SERVICE, BATTERY.LEVEL))) return;
     try {
+      if (!(await this.conn.hasCharacteristic(BATTERY.SERVICE, BATTERY.LEVEL))) return;
       const handler = (v: DataView) => v.byteLength && this.cb.onBattery(v.getUint8(0), 'service');
       handler(await this.conn.read(BATTERY.SERVICE, BATTERY.LEVEL));
       this.hasBatteryService = true;

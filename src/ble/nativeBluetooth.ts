@@ -75,7 +75,14 @@ class NativeConnection implements BleConnection {
   async open() {
     await BleClient.connect(this.id, () => this.handleDisconnect(), { timeout: CONNECT_TIMEOUT });
     this.connected = true;
-    this.services = await BleClient.getServices(this.id);
+    try {
+      this.services = await BleClient.getServices(this.id);
+    } catch (err) {
+      // The caller never gets this connection on failure, so close the link here or the sensor
+      // stays connected (and unreachable for later attempts or other apps).
+      await this.disconnect();
+      throw err;
+    }
   }
 
   private handleDisconnect() {

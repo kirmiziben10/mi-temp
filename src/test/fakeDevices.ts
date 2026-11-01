@@ -85,6 +85,7 @@ export interface StockRecordSpec {
 }
 
 export interface StockDeviceOptions {
+  /** Read live on every request, so a test can mutate it between syncs (e.g. simulate a reset). */
   records: StockRecordSpec[];
   clock: number;
   newCount?: number;
@@ -95,6 +96,26 @@ export interface StockDeviceOptions {
   ignoresResume?: boolean;
   /** Stop streaming after this many records (simulates link trouble). */
   stopAfter?: number;
+  /** Notifications lost on the first transmission only. */
+  dropOnce?: number[];
+  /** Notifications lost every time. */
+  dropAlways?: number[];
+}
+
+/** Hourly records first..last, the newest ending `endHoursAgo` hours before device time `clock`. */
+export function hourly(first: number, last: number, clock: number, endHoursAgo = 1): StockRecordSpec[] {
+  if (clock < (last - first + 1 + endHoursAgo) * 3600) throw new Error('fixture: device clock younger than its log');
+  return Array.from({ length: last - first + 1 }, (_, i) => {
+    const index = first + i;
+    return {
+      index,
+      deviceTime: clock - (last - index + endHoursAgo) * 3600,
+      maxT: 24 + (index % 3),
+      maxH: 50,
+      minT: 21.5,
+      minH: 40,
+    };
+  });
 }
 
 export function stockRecordBytes(r: StockRecordSpec): Uint8Array {
@@ -111,16 +132,22 @@ export function stockRecordBytes(r: StockRecordSpec): Uint8Array {
 
 export function fakeStockDevice(opts: StockDeviceOptions) {
   const conn = new FakeConnection([STOCK.SERVICE]);
-  const lastIndex = opts.records.length ? Math.max(...opts.records.map((r) => r.index)) : 0;
-  conn.onRead(STOCK.NUM_RECORDS, () => new Uint8Array([...u32(lastIndex), ...u32(opts.newCount ?? 3)]));
+  const dropped = new Set<number>();
+  const lastIndex = () => (opts.records.length ? Math.max(...opts.records.map((r) => r.index)) : 0);
+  conn.onRead(STOCK.NUM_RECORDS, () => new Uint8Array([...u32(lastIndex()), ...u32(opts.newCount ?? 3)]));
   conn.onRead(STOCK.TIME, () => new Uint8Array([...u32(opts.clock), 0x03]));
   conn.onWrite(STOCK.RECORD_IDX, (data) => {
     const start = new DataView(data.buffer, data.byteOffset).getUint32(0, true);
     if (start !== 0 && opts.ignoresResume) return;
     const toSend = opts.records.filter((r) => r.index >= start).slice(0, opts.stopAfter);
-    toSend.forEach((r, i) =>
-      conn.notify(STOCK.HISTORY, stockRecordBytes(r), (opts.firstDelayMs ?? 0) + i * (opts.perRecordMs ?? 1)),
-    );
+    toSend.forEach((r, i) => {
+      if (opts.dropAlways?.includes(r.index)) return;
+      if (opts.dropOnce?.includes(r.index) && !dropped.has(r.index)) {
+        dropped.add(r.index);
+        return;
+      }
+      conn.notify(STOCK.HISTORY, stockRecordBytes(r), (opts.firstDelayMs ?? 0) + i * (opts.perRecordMs ?? 1));
+    });
   });
   return conn;
 }
@@ -129,6 +156,8 @@ export function fakeStockDevice(opts: StockDeviceOptions) {
 export function fakePvvxDevice(opts: {
   records: { deviceTime: number; temperature: number; humidity: number; mv: number }[];
   clock: number;
+  /** Send only this many records and no end marker (link trouble), once. */
+  stopAfterOnce?: number;
 }) {
   const conn = new FakeConnection([PVVX.SERVICE]);
   let cancelled = false;
@@ -143,7 +172,9 @@ export function fakePvvxDevice(opts: {
         return;
       }
       cancelled = false;
-      const newestFirst = [...opts.records].sort((a, b) => b.deviceTime - a.deviceTime).slice(0, count);
+      const limit = opts.stopAfterOnce;
+      opts.stopAfterOnce = undefined;
+      const newestFirst = [...opts.records].sort((a, b) => b.deviceTime - a.deviceTime).slice(0, Math.min(count, limit ?? count));
       newestFirst.forEach((r, i) => {
         setTimeout(() => {
           if (cancelled) return;
@@ -158,7 +189,7 @@ export function fakePvvxDevice(opts: {
           conn.notify(PVVX.COMMAND, b);
         }, i);
       });
-      setTimeout(() => !cancelled && conn.notify(PVVX.COMMAND, '350000'), newestFirst.length + 1);
+      if (limit === undefined) setTimeout(() => !cancelled && conn.notify(PVVX.COMMAND, '350000'), newestFirst.length + 1);
     }
   });
   return conn;

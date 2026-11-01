@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bytesToHex, hexToBytes } from '../lib/bytes';
-import { fakeMiDevice, fakePvvxDevice, fakeStockDevice, type StockRecordSpec } from '../test/fakeDevices';
+import { fakeMiDevice, fakePvvxDevice, fakeStockDevice, hourly } from '../test/fakeDevices';
 import { toWallTime } from './clock';
 import { batteryFromVoltage, parsePvvxPacket, parseStockReading, parseStockRecord } from './codec';
 import { activateDevice } from './miActivation';
@@ -13,15 +13,6 @@ import type { FakeConnection } from '../test/fakeDevices';
 
 const view = (hex: string) => new DataView(hexToBytes(hex).buffer);
 const FAST = { firstRecordTimeoutMs: 400, idleTimeoutMs: 150 };
-
-/** Hourly records ending at device time `clock`, indices first..last. */
-function hourly(first: number, last: number, clock: number): StockRecordSpec[] {
-  if (clock < (last - first + 2) * 3600) throw new Error('fixture: device clock younger than its log');
-  return Array.from({ length: last - first + 1 }, (_, i) => {
-    const index = first + i;
-    return { index, deviceTime: clock - (last - index + 1) * 3600, maxT: 24 + (index % 3), maxH: 50, minT: 21.5, minH: 40 };
-  });
-}
 
 describe('codec', () => {
   it('decodes stock readings as signed int16 (negative temperatures)', () => {
@@ -135,12 +126,15 @@ describe('stock history sync', () => {
     expect(progress.at(-1)).toBe(168);
   });
 
-  it('returns partial data when the stream stops early', async () => {
+  it('retries once from where the stream stopped, then returns partial data', async () => {
     const clock = 1_000_000;
+    // The link drops after 12 records on every request.
     const conn = fakeStockDevice({ records: hourly(1, 30, clock), clock, stopAfter: 12 });
     const res = await syncStockHistory(conn, FAST);
     expect(res.complete).toBe(false);
-    expect(res.points).toHaveLength(12);
+    expect(res.points).toHaveLength(24); // 1..12, then 13..24 from the retry
+    expect(res.resumeAfter).toBe(24);
+    expect(res.missing).toEqual([25, 26, 27, 28, 29, 30]);
   });
 
   it('reports an error when nothing ever arrives', async () => {
@@ -166,6 +160,54 @@ describe('stock history sync', () => {
     const res = await syncStockHistory(conn, FAST);
     expect(res.points).toHaveLength(9);
     expect(res.complete).toBe(true);
+  });
+
+  it('re-requests a record whose notification was lost (review: missed packet)', async () => {
+    const clock = 1_000_000;
+    const conn = fakeStockDevice({ records: hourly(1, 10, clock), clock, dropOnce: [5] });
+    const res = await syncStockHistory(conn, FAST);
+    expect(res.points.map((p) => p.index)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(res).toMatchObject({ complete: true, missing: [], resumeAfter: 10 });
+    expect(conn.writes.filter((w) => w.char === STOCK.RECORD_IDX).map((w) => w.hex)).toEqual(['00000000', '05000000']);
+  });
+
+  it('never resumes past a record that stays missing', async () => {
+    const clock = 1_000_000;
+    const conn = fakeStockDevice({ records: hourly(1, 10, clock), clock, dropAlways: [5] });
+    const res = await syncStockHistory(conn, FAST);
+    expect(res).toMatchObject({ complete: false, missing: [5], resumeAfter: 4 });
+    expect(res.points).toHaveLength(9);
+  });
+
+  it('does not count records that expired from the ring buffer as gaps', async () => {
+    const clock = 1_000_000;
+    const conn = fakeStockDevice({ records: hourly(40, 60, clock), clock });
+    const res = await syncStockHistory(conn, { ...FAST, afterIndex: 20 }); // 21..39 are long gone
+    expect(res).toMatchObject({ complete: true, missing: [], resumeAfter: 60 });
+  });
+
+  it('treats an empty log after a previous sync as a reset (review: empty reset)', async () => {
+    const conn = fakeStockDevice({ records: [], clock: 100 });
+    const res = await syncStockHistory(conn, { ...FAST, afterIndex: 50 });
+    expect(res).toMatchObject({ points: [], complete: true, deviceReset: true, resumeAfter: 0 });
+  });
+
+  it('detects a reset from the restarted device clock even when the counter has moved past us', async () => {
+    const clock = 1_000_000;
+    const conn = fakeStockDevice({ records: hourly(1, 30, clock), clock });
+    const staleEpoch = Date.now() - 5_000_000 * 1000; // device booted at a very different time before
+    const res = await syncStockHistory(conn, { ...FAST, afterIndex: 10, expectedEpoch: staleEpoch });
+    expect(res.deviceReset).toBe(true);
+    expect(res.points).toHaveLength(30);
+  });
+
+  it('keeps resuming normally while the device clock is consistent', async () => {
+    const clock = 1_000_000;
+    const conn = fakeStockDevice({ records: hourly(1, 30, clock), clock });
+    const first = await syncStockHistory(conn, { ...FAST, afterIndex: 25 });
+    const again = await syncStockHistory(conn, { ...FAST, afterIndex: 25, expectedEpoch: first.deviceEpoch });
+    expect(again.deviceReset).toBe(false);
+    expect(again.points.map((p) => p.index)).toEqual([26, 27, 28, 29, 30]);
   });
 
   it('handles an empty log', async () => {

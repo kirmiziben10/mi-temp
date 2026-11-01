@@ -9,10 +9,11 @@ import {
   clearDeviceLog,
   loadDeviceLog,
   loadLocalLog,
-  mergeDeviceLog,
-  saveDeviceLog,
+  saveDeviceLogTrimming,
   saveLocalLog,
+  type DeviceLog,
 } from '../storage/history';
+import { applyPvvxResult, applyStockResult, countAdded, pvvxRequest, stockRequest, usableCache } from '../storage/syncPlan';
 import { storage } from '../storage/storage';
 
 export type Status = 'disconnected' | 'connecting' | 'connected';
@@ -55,6 +56,9 @@ export function useDevice() {
   const sessionRef = useRef<DeviceSession | null>(null);
   const syncAbort = useRef<AbortController | null>(null);
   const scanStop = useRef<Unsubscribe | null>(null);
+  /** The connection the UI currently belongs to; callbacks from any other one are stale. */
+  const activeConn = useRef<BleConnection | null>(null);
+  const removeDisconnectListener = useRef<(() => void) | null>(null);
 
   const [availability, setAvailability] = useState<{ available: boolean; reason?: string } | null>(null);
   const [status, setStatus] = useState<Status>('disconnected');
@@ -102,6 +106,9 @@ export function useDevice() {
   }, [localHistory]);
 
   const resetLive = useCallback(() => {
+    removeDisconnectListener.current?.();
+    removeDisconnectListener.current = null;
+    activeConn.current = null;
     sessionRef.current = null;
     setStatus('disconnected');
     setReading(null);
@@ -114,7 +121,12 @@ export function useDevice() {
   const startSession = useCallback(
     async (conn: BleConnection) => {
       addLog('Connected to GATT server', conn.name);
-      conn.onDisconnect(() => {
+      removeDisconnectListener.current?.();
+      activeConn.current = conn;
+      let lost = false;
+      removeDisconnectListener.current = conn.onDisconnect(() => {
+        if (activeConn.current !== conn) return; // a previous connection, already torn down
+        lost = true;
         addLog('Device disconnected');
         syncAbort.current?.abort(new AbortedError('Device disconnected'));
         resetLive();
@@ -135,6 +147,11 @@ export function useDevice() {
           setBatteryEstimated(source === 'voltage');
         },
       });
+      // The link can drop while the session is starting; don't publish a dead connection.
+      if (lost || activeConn.current !== conn || !conn.isConnected()) {
+        await session.close().catch(() => undefined);
+        throw new Error('The device disconnected while connecting. Please try again.');
+      }
       sessionRef.current = session;
       setFirmware(session.firmware);
       setSupportsActivation(session.supportsActivation);
@@ -217,7 +234,7 @@ export function useDevice() {
   const disconnect = useCallback(async () => {
     syncAbort.current?.abort();
     const session = sessionRef.current;
-    resetLive();
+    resetLive(); // also detaches the disconnect listener, so this isn't reported as a link loss
     addLog('Disconnected by user');
     await session?.close();
   }, [addLog, resetLive]);
@@ -226,9 +243,7 @@ export function useDevice() {
     const session = sessionRef.current;
     if (!session || sync.running) return;
     const id = session.conn.id;
-    const cached = loadDeviceLog(id);
-    const sameFirmware = cached?.firmware === session.firmware;
-    const existing = sameFirmware ? cached.points : [];
+    const cache = usableCache(loadDeviceLog(id), session.firmware);
     const ac = new AbortController();
     syncAbort.current = ac;
     setSync({ running: true, received: 0 });
@@ -237,40 +252,40 @@ export function useDevice() {
     addLog('Starting device history sync…');
     const onProgress = (p: SyncProgress) => setSync({ running: true, ...p });
     try {
-      let merged: HistoryPoint[];
-      let added: number;
-      let lastIndex: number | undefined;
+      let next: DeviceLog;
       let complete: boolean;
       if (session.firmware === 'stock') {
-        const res = await session.syncStock({
-          afterIndex: sameFirmware ? cached.lastIndex : undefined,
-          signal: ac.signal,
-          onProgress,
-        });
-        merged = mergeDeviceLog(existing, res.points, { deviceReset: res.deviceReset });
-        added = merged.length - existing.length;
-        const received = res.points.map((p) => p.index ?? 0);
-        lastIndex = res.complete
-          ? res.lastIndex
-          : received.length
-            ? Math.max(...received)
-            : res.deviceReset
-              ? undefined
-              : cached?.lastIndex;
+        const res = await session.syncStock({ ...stockRequest(cache), signal: ac.signal, onProgress });
+        next = applyStockResult(cache, res);
         complete = res.complete;
       } else {
-        const res = await session.syncPvvx({ newerThan: existing.at(-1)?.t, signal: ac.signal, onProgress });
-        merged = mergeDeviceLog(existing, res.points);
-        added = merged.length - existing.length;
+        if (cache?.incomplete) addLog('Previous read-out was interrupted; reading the full log');
+        const res = await session.syncPvvx({ ...pvvxRequest(cache), signal: ac.signal, onProgress });
+        next = applyPvvxResult(cache, res);
         complete = res.complete;
       }
+      const added = countAdded(cache?.points, next.points);
       const now = Date.now();
-      saveDeviceLog(id, { firmware: session.firmware, points: merged, lastIndex, lastSync: now });
-      setDeviceHistory(merged);
-      setLastSync(now);
-      const msg = `${added} new record${added === 1 ? '' : 's'}${complete ? '' : ' (stream ended early — sync again to continue)'}`;
+      next.lastSync = now;
+      const total = next.points.length;
+      const saved = saveDeviceLogTrimming(id, next);
+      let msg = `${added} new record${added === 1 ? '' : 's'}`;
+      if (!complete) msg += ' (stream ended early — sync again to continue)';
+      if (saved === 0) {
+        // Keep showing what was downloaded, but say it is not persisted.
+        msg += '. Could not save the history (storage full?), so it will be lost on reload';
+        addLog('Could not save device history cache (storage full?)');
+      } else {
+        if (saved < total) {
+          next.points = next.points.slice(total - saved);
+          msg += `. Storage is full, so only the newest ${saved} records were kept`;
+          addLog('Storage full: trimmed the device history cache', { kept: saved, dropped: total - saved });
+        }
+        setLastSync(now);
+      }
+      setDeviceHistory(next.points);
       setSyncMessage(msg);
-      addLog('History sync finished', { added, total: merged.length, complete });
+      addLog('History sync finished', { added, total: next.points.length, complete });
     } catch (err) {
       if (isCancel(err)) {
         setSyncMessage('Sync cancelled');
@@ -311,7 +326,8 @@ export function useDevice() {
     try {
       const res = await session.activate();
       setBindKey(res.bindKey);
-      addLog('Activation successful', { bindKey: res.bindKey, token: res.token, firmware: res.firmwareVersion });
+      // The key goes into the Bind Key field only; derived session material is never logged.
+      addLog('Activation successful — bind key saved', { firmware: res.firmwareVersion, wasActivated: res.wasActivated });
     } catch (err) {
       setError(`Activation failed: ${describeError(err)}`);
       addLog('Activation failed', describeError(err));

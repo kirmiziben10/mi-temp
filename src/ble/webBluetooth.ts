@@ -37,12 +37,12 @@ export class WebBluetoothTransport implements BleTransport {
   }
 }
 
-class WebConnection implements BleConnection {
+export class WebConnection implements BleConnection {
   private readonly queue = new SerialQueue();
   private readonly services = new Map<Uuid, Promise<BluetoothRemoteGATTService | null>>();
   private readonly chars = new Map<string, Promise<BluetoothRemoteGATTCharacteristic | null>>();
   private readonly disconnectCallbacks = new Set<() => void>();
-  private intentionalDisconnect = false;
+  intentionalDisconnect = false;
 
   private constructor(private readonly device: BluetoothDevice) {
     device.addEventListener('gattserverdisconnected', this.handleDisconnect);
@@ -50,17 +50,23 @@ class WebConnection implements BleConnection {
 
   static async open(device: BluetoothDevice): Promise<WebConnection> {
     const conn = new WebConnection(device);
+    const gatt = device.gatt!;
     let lastError: unknown;
     // Chrome's first GATT connect to a sleepy sensor fails surprisingly often; retry a few times.
     for (let attempt = 1; attempt <= CONNECT_ATTEMPTS; attempt++) {
+      const pending = gatt.connect();
       try {
-        await withTimeout(device.gatt!.connect(), CONNECT_TIMEOUT, 'GATT connect');
+        await withTimeout(pending, CONNECT_TIMEOUT, 'GATT connect');
         return conn;
       } catch (err) {
         lastError = err;
+        // A timed-out connect is still running. Cancel it (disconnect() aborts a pending connect)
+        // and wait for it to settle, so it can't overlap the next attempt or finish unobserved.
+        await cancelConnect(gatt, pending);
         if (attempt < CONNECT_ATTEMPTS) await sleep(500 * attempt);
       }
     }
+    conn.intentionalDisconnect = true;
     device.removeEventListener('gattserverdisconnected', conn.handleDisconnect);
     throw lastError;
   }
@@ -89,7 +95,7 @@ class WebConnection implements BleConnection {
     if (!p) {
       p = this.queue
         .run(() => withTimeout(this.device.gatt!.getPrimaryService(uuid), OP_TIMEOUT, 'Service discovery'))
-        .catch(() => null);
+        .catch((err) => this.absentOrRethrow(this.services, uuid, err));
       this.services.set(uuid, p);
     }
     return p;
@@ -99,16 +105,29 @@ class WebConnection implements BleConnection {
     const key = `${service}/${characteristic}`;
     let p = this.chars.get(key);
     if (!p) {
-      p = this.service(service).then((s) =>
-        s
-          ? this.queue
-              .run(() => withTimeout(s.getCharacteristic(characteristic), OP_TIMEOUT, 'Characteristic discovery'))
-              .catch(() => null)
-          : null,
-      );
+      p = this.service(service)
+        .then((s) =>
+          s
+            ? this.queue.run(() =>
+                withTimeout(s.getCharacteristic(characteristic), OP_TIMEOUT, 'Characteristic discovery'),
+              )
+            : null,
+        )
+        .catch((err) => this.absentOrRethrow(this.chars, key, err));
       this.chars.set(key, p);
     }
     return p;
+  }
+
+  /**
+   * Web Bluetooth reports a missing service/characteristic as NotFoundError; only that means
+   * "absent" and is cached. Anything else (timeout, link hiccup) is evicted and rethrown, so it
+   * surfaces as an error and a later attempt retries, instead of looking like unsupported hardware.
+   */
+  private absentOrRethrow<T>(cache: Map<string, Promise<T | null>>, key: string, err: unknown): null {
+    if (err instanceof DOMException && err.name === 'NotFoundError') return null;
+    cache.delete(key);
+    throw err;
   }
 
   private async require(service: Uuid, characteristic: Uuid) {
@@ -171,4 +190,17 @@ class WebConnection implements BleConnection {
     this.chars.clear();
     if (this.device.gatt?.connected) this.device.gatt.disconnect();
   }
+}
+
+/** Cancels a GATT connect that is still pending and waits (bounded) for it to settle. */
+async function cancelConnect(gatt: BluetoothRemoteGATTServer, pending: Promise<unknown>) {
+  try {
+    gatt.disconnect();
+  } catch {
+    // ignore
+  }
+  const settled = await Promise.race([pending.then(() => 'connected', () => 'failed'), sleep(3000).then(() => 'stuck')]);
+  // A late success despite the cancel: tear it down too.
+  if (settled === 'connected' || gatt.connected) gatt.disconnect();
+  if (settled === 'stuck') void pending.then(() => gatt.disconnect(), () => undefined);
 }

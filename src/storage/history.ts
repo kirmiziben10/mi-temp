@@ -77,19 +77,33 @@ function thinToInterval(points: HistoryPoint[], interval: number): HistoryPoint[
 export interface DeviceLog {
   firmware: Firmware;
   points: HistoryPoint[];
-  /** Stock: newest record index downloaded in the current counter epoch. */
+  /** Stock: resume point — every record up to this index has been downloaded. */
   lastIndex?: number;
+  /** Stock: host time at which the device clock read zero; a jump means the device was reset. */
+  deviceEpoch?: number;
+  /** pvvx: the last read-out stopped early, so the next one must not stop at known records. */
+  incomplete?: boolean;
   lastSync?: number;
 }
 
 export function loadDeviceLog(deviceId: string): DeviceLog | null {
-  const saved = storage.get<{ v: 2; firmware: Firmware; lastIndex?: number; lastSync?: number; points: DeviceTuple[] }>(
+  const saved = storage.get<{
+    v: 2;
+    firmware: Firmware;
+    lastIndex?: number;
+    deviceEpoch?: number;
+    incomplete?: boolean;
+    lastSync?: number;
+    points: DeviceTuple[];
+  }>(
     deviceKey(deviceId),
   );
   if (saved?.v !== 2 || !Array.isArray(saved.points)) return null;
   return {
     firmware: saved.firmware,
     lastIndex: saved.lastIndex,
+    deviceEpoch: saved.deviceEpoch,
+    incomplete: saved.incomplete,
     lastSync: saved.lastSync,
     points: saved.points.map(([t, temperature, humidity, minT, maxT, minH, maxH, voltage, index]) => ({
       t,
@@ -123,6 +137,8 @@ export function saveDeviceLog(deviceId: string, log: DeviceLog): boolean {
     v: 2,
     firmware: log.firmware,
     lastIndex: log.lastIndex,
+    deviceEpoch: log.deviceEpoch,
+    incomplete: log.incomplete,
     lastSync: log.lastSync,
     points: tuples,
   });
@@ -137,8 +153,9 @@ export function clearDeviceLog(deviceId: string) {
  *
  * Stock records are matched by record index, and the cached copy wins. Its timestamp was
  * computed closest to when the record was made, so it carries the least clock-drift error.
- * On a device reset the indices restart, so indices on the old points are dropped first.
- * pvvx records (no index) are matched by time within `toleranceMs`.
+ * On a device reset the indices restart, so indices on the old points are dropped first. Points
+ * without an index (pvvx, or stock records from before a reset) are matched by time within
+ * `toleranceMs`. That also stops a false-positive reset from duplicating records.
  */
 export function mergeDeviceLog(
   existing: HistoryPoint[],
@@ -147,13 +164,29 @@ export function mergeDeviceLog(
 ): HistoryPoint[] {
   const base: HistoryPoint[] = deviceReset ? existing.map(({ index: _index, ...p }) => p) : existing;
   const byIndex = new Set(base.flatMap((p) => (p.index === undefined ? [] : [p.index])));
-  const times = base.map((p) => p.t).sort((a, b) => a - b);
+  const unindexedTimes = base.filter((p) => p.index === undefined).map((p) => p.t).sort((a, b) => a - b);
 
   const added = incoming.filter((p) => {
-    if (p.index !== undefined) return !byIndex.has(p.index);
-    return !hasNear(times, p.t, toleranceMs);
+    if (p.index !== undefined && byIndex.has(p.index)) return false;
+    return !hasNear(unindexedTimes, p.t, toleranceMs);
   });
   return [...base, ...added].sort((a, b) => a.t - b.t).slice(-DEVICE_MAX_POINTS);
+}
+
+/** Stock logs one record per hour, so anything within 10 minutes is the same record. */
+export const STOCK_SAME_RECORD_MS = 10 * 60_000;
+
+/**
+ * Saves the log, dropping the oldest half if storage is full. Returns how many points were kept
+ * (0 if nothing could be saved).
+ */
+export function saveDeviceLogTrimming(deviceId: string, log: DeviceLog): number {
+  let points = log.points.slice(-DEVICE_MAX_POINTS);
+  for (let attempt = 0; attempt < 3 && points.length > 0; attempt++) {
+    if (saveDeviceLog(deviceId, { ...log, points })) return points.length;
+    points = points.slice(Math.floor(points.length / 2));
+  }
+  return 0;
 }
 
 function hasNear(sorted: number[], t: number, tolerance: number): boolean {
