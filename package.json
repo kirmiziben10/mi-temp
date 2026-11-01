@@ -1,9 +1,9 @@
 {
   "name": "mi-temperature-monitor",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "A modern, responsive React application to connect to Xiaomi Mi Temperature and Humidity Monitor 2 devices using Web Bluetooth API.",
+  "description": "Web + Android app for the Xiaomi Mi Temperature and Humidity Monitor 2 (LYWSD03MMC): live readings, on-device history sync and bind-key activation over Bluetooth LE.",
   "author": "kirmiziben10",
   "license": "MIT",
   "homepage": "https://github.com/kirmiziben10/mi-temp",
@@ -13,37 +13,52 @@
   },
   "keywords": [
     "xiaomi",
-    "mi-temp",
+    "lywsd03mmc",
     "bluetooth",
     "web-bluetooth",
-    "react",
-    "vite",
-    "lywsd03mmc",
-    "iot"
+    "capacitor",
+    "android",
+    "react"
   ],
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "android:sync": "vite build && cap sync android",
+    "android:open": "cap open android",
+    "android:run": "vite build && cap run android",
+    "android:apk": "vite build && cap sync android && cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
-    "postcss": "^8.5.6",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "recharts": "^3.7.0",
-    "tailwindcss": "^4.1.18"
+    "@capacitor-community/bluetooth-le": "^8.3.0",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.10.1"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "vite": "^7.2.4"
+    "@capacitor/cli": "^8.6.0",
+    "@eslint/js": "^10.0.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/web-bluetooth": "^0.0.22",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
   }
 }
